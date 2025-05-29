@@ -15,13 +15,13 @@ def extracao_bcb(codigo, data_inicio, data_fim):
     return df
 
 data_inicio = '01/05/1993'
-data_fim = '30/12/2023'
+data_fim = '30/04/2025'
 dados=[]
 dados = extracao_bcb(4390, data_inicio=data_inicio, data_fim=data_fim)
 indices = ['^BVSP']
 
 for i in indices:
-    dados[i] = yf.download(i, start='1993-05-01', end='2023-12-30', interval='1mo')['Adj Close'].pct_change()
+    dados[i] = yf.download(i, start='1993-05-01', end='2023-12-30', interval='1mo')['Close'].pct_change()
 
 dados
 dados = dados.iloc[1:]
