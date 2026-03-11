@@ -6,10 +6,10 @@ import pandas as pd
 import seaborn as sns
 
 ativos = ['PETR4.SA',	'ITUB4.SA',	'BBDC4.SA', 'VALE3.SA',	'ABEV3.SA',	
-          'BBAS3.SA',	'B3SA3.SA', 'ITSA4.SA',	'BRFS3.SA',	'GGBR4.SA']
+          'BBAS3.SA',	'B3SA3.SA', 'ITSA4.SA',	'USIM5.SA',	'GGBR4.SA']
 
 inicio = '2021-01-04'
-fim = '2025-04-30'
+fim = '2026-02-28'
 
 df = yf.download(ativos, start=inicio, end=fim)['Close']
 df.head()

@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 # Código do fundo - ajuste conforme necessário
-ticker = "MSCI"  # ou o código correto do fundo Morgan Stanley
+ticker = "MSCI"  
 
 # Busca dados do fundo
 fund = yf.Ticker(ticker)
@@ -37,6 +37,3 @@ print(f"Volatilidade: {volatility:.2f}%")
 print(f"Sharpe Ratio: {sharpe_ratio:.2f}")
 print(f"Drawdown máximo: {max_drawdown:.2f}%")
 
-# Salva em Excel
-hist.to_excel('historico_fundo.xlsx')
-print("Histórico salvo em historico_fundo.xlsx")
