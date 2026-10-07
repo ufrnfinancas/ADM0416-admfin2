@@ -178,15 +178,17 @@ for rho, nome_arq, titulo in [(1.0, "rho1.png", r"Combinações com $\rho = 1$")
 peso_risco_zero = sig_B / (sig_A + sig_B)
 print("Peso de A que zera o risco quando rho = -1:", peso_risco_zero)
 
-# %% 9. Fronteira eficiente com vários ativos (slides 15 a 18)
+# %% 9. Conjunto de mínima variância e fronteira eficiente de ativos arriscados (slides 15 a 18)
 # Entradas: vetor de retornos esperados, matriz de covariância e limites para os pesos.
+# Para cada retorno-alvo, achamos a carteira de menor variância. Isso gera o conjunto de mínima variância (a "bala" inteira).
+# A fronteira eficiente é apenas a parte de cima, a partir da carteira de mínima variância global.
 mu = mu_anual.values
 cov = ret_diarios.cov().values * 252
 n = len(mu)
 limites = [(0.0, 1.0)] * n   # sem venda a descoberto
 
 w0 = np.ones(n) / n
-alvos = np.linspace(mu.min(), mu.max(), 40)
+alvos = np.linspace(mu.min(), mu.max(), 60)
 sig_front = []
 pesos_front = []
 
@@ -207,6 +209,13 @@ w_mv = res_mv.x
 mu_mv = w_mv @ mu
 sig_mv = np.sqrt(res_mv.fun)
 
+# Separação: parte eficiente (retorno acima do da carteira de mínima variância) e parte ineficiente (abaixo)
+mascara_ef = alvos >= mu_mv
+sig_ef = np.concatenate([[sig_mv], sig_front[mascara_ef]])
+ret_ef = np.concatenate([[mu_mv], alvos[mascara_ef]])
+sig_inef = np.concatenate([sig_front[~mascara_ef], [sig_mv]])
+ret_inef = np.concatenate([alvos[~mascara_ef], [mu_mv]])
+
 # Carteiras aleatórias para mostrar a "nuvem" de possibilidades
 rng = np.random.default_rng(42)
 w_rand = rng.dirichlet(np.ones(n), size=5000)
@@ -215,29 +224,30 @@ sig_rand = np.sqrt(np.einsum("ij,jk,ik->i", w_rand, cov, w_rand))
 
 fig, ax = plt.subplots()
 ax.scatter(sig_rand, mu_rand, s=4, color="lightgray", label="Carteiras aleatórias")
-ax.plot(sig_front, alvos, color="navy", linewidth=2, label="Fronteira eficiente")
-ax.scatter([sig_mv], [mu_mv], color="firebrick", s=70, zorder=3, label="Mínima variância")
+ax.plot(sig_inef, ret_inef, color="gray", linestyle="--", linewidth=2, label="Mínima variância (parte ineficiente)")
+ax.plot(sig_ef, ret_ef, color="navy", linewidth=3, label="Fronteira eficiente")
+ax.scatter([sig_mv], [mu_mv], color="firebrick", s=70, zorder=3, label="Carteira de mínima variância global")
 ax.scatter(sigma_anual.values, mu, color="darkgreen", s=30, label="Ativos individuais")
 ax.set_xlabel("Risco")
 ax.set_ylabel("Retorno esperado")
-ax.set_title("Fronteira eficiente")
+ax.set_title("Fronteira eficiente de ativos arriscados")
 ax.legend()
 fig.savefig("fronteira.png", dpi=200, bbox_inches="tight")
 plt.show()
 
 # %% 10. Fronteira eficiente: exemplo prático com a composição dos pesos (slide 19)
-# Gráfico de área empilhada mostrando como os pesos mudam ao longo da fronteira.
+# Gráfico de área empilhada mostrando como os pesos mudam ao longo da fronteira eficiente.
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-ax1.plot(sig_front, alvos, color="navy", linewidth=2)
+ax1.plot(sig_ef, ret_ef, color="navy", linewidth=2)
 ax1.scatter([sig_mv], [mu_mv], color="firebrick", s=70, zorder=3)
 ax1.set_xlabel("Risco")
 ax1.set_ylabel("Retorno esperado")
 ax1.set_title("Fronteira eficiente")
 
-ax2.stackplot(sig_front, pesos_front.T, labels=[t.replace(".SA", "") for t in tickers])
+ax2.stackplot(sig_front[mascara_ef], pesos_front[mascara_ef].T, labels=[t.replace(".SA", "") for t in tickers])
 ax2.set_xlabel("Risco da carteira na fronteira")
 ax2.set_ylabel("Peso")
-ax2.set_title("Composição ao longo da fronteira")
+ax2.set_title("Composição ao longo da fronteira eficiente")
 ax2.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
 fig.savefig("fronteiraexemplo.png", dpi=200, bbox_inches="tight")
 plt.show()
@@ -260,9 +270,9 @@ comparacao_pesos = pd.DataFrame({"amostral": w_mv, "shrinkage": res_mv_lw.x},
                                 index=[t.replace(".SA", "") for t in tickers]).round(3)
 print(comparacao_pesos)
 
-# %% 12. CAPM na prática: dados mensais (slides 21 e 22)
-# Retornos mensais dos últimos 5 anos, Ibovespa como mercado e CDI na curva como ativo livre de risco.
+# %% 12. Taxa livre de risco: CDI mensal do Banco Central
 # O CDI mensal (série 4391 do SGS) é buscado diretamente na API do Banco Central.
+# Ele serve de taxa livre de risco nas fronteiras com ativo livre de risco e, mais adiante, no CAPM.
 import requests
 from io import StringIO
 
@@ -284,75 +294,13 @@ cdi_mensal = cdi_bruto.set_index("data")["valor"]
 cdi_mensal.index = cdi_mensal.index.to_period("M")
 cdi_mensal.name = "cdi"
 
-precos_mensais = dados[["^BVSP", ticker_acao]].resample("ME").last()
-ret_mensal = precos_mensais.pct_change().dropna()
-ret_mensal.index = ret_mensal.index.to_period("M")
-
-base = ret_mensal.join(cdi_mensal, how="inner").dropna()
-base["premio_acao"] = base[ticker_acao] - base["cdi"]
-base["premio_mercado"] = base["^BVSP"] - base["cdi"]
-print(base.tail())
-print("Número de observações mensais:", len(base))
-
-# %% 13. Retornos da ação contra o Ibovespa (slide 23)
-fig, ax = plt.subplots()
-ax.scatter(base["^BVSP"], base[ticker_acao], color="navy", alpha=0.7)
-ax.axhline(0, color="black", linewidth=0.8)
-ax.axvline(0, color="black", linewidth=0.8)
-ax.set_xlabel("Retorno mensal do Ibovespa")
-ax.set_ylabel(f"Retorno mensal de {ticker_acao}")
-ax.set_title("Retornos mensais: ação x Ibovespa")
-fig.savefig("scatteracaoibov.png", dpi=200, bbox_inches="tight")
-plt.show()
-
-# %% 14. Regressão do CAPM com prêmios de risco (slide 24)
-# Y = beta0 + beta1 X + erro, com X o prêmio de risco de mercado e Y o prêmio de risco da ação.
-reg = stats.linregress(base["premio_mercado"], base["premio_acao"])
-beta0 = reg.intercept   # alfa de Jensen mensal
-beta1 = reg.slope       # beta da ação
-print("Alfa mensal :", beta0, " (erro padrão:", reg.intercept_stderr, ")")
-print("Beta        :", beta1, " (erro padrão:", reg.stderr, ")")
-print("R ao quadrado:", reg.rvalue**2)
-print("p-valor do beta:", reg.pvalue)
-
-# Conferência manual: beta = cov(X,Y) / var(X)
-beta_manual = base["premio_mercado"].cov(base["premio_acao"]) / base["premio_mercado"].var()
-print("Beta manual :", beta_manual)
-
-xx = np.linspace(base["premio_mercado"].min(), base["premio_mercado"].max(), 100)
-fig, ax = plt.subplots()
-ax.scatter(base["premio_mercado"], base["premio_acao"], color="navy", alpha=0.7)
-ax.plot(xx, beta0 + beta1 * xx, color="firebrick", linewidth=2, label=f"beta = {beta1:.2f}")
-ax.axhline(0, color="black", linewidth=0.8)
-ax.axvline(0, color="black", linewidth=0.8)
-ax.set_xlabel("Prêmio de risco do mercado (Ibovespa - CDI)")
-ax.set_ylabel(f"Prêmio de risco de {ticker_acao} (ação - CDI)")
-ax.set_title("CAPM: regressão dos prêmios de risco")
-ax.legend()
-fig.savefig("regressao.png", dpi=200, bbox_inches="tight")
-plt.show()
-
-# %% 15. Retorno esperado pelo CAPM (slide 21)
-# r_i = r_f + beta (r_m - r_f), com tudo anualizado em termos nominais.
-rf_anual = (1 + base["cdi"]).prod() ** (12 / len(base)) - 1
-rm_anual = (1 + base["^BVSP"]).prod() ** (12 / len(base)) - 1
-premio_mercado_anual = rm_anual - rf_anual
-
-ret_esperado_capm = rf_anual + beta1 * premio_mercado_anual
-ret_realizado_acao = (1 + base[ticker_acao]).prod() ** (12 / len(base)) - 1
-
-print("Taxa livre de risco anual (CDI)      :", rf_anual)
-print("Retorno anual do Ibovespa            :", rm_anual)
-print("Prêmio de risco de mercado anual     :", premio_mercado_anual)
-print("Retorno esperado pelo CAPM da ação   :", ret_esperado_capm)
-print("Retorno anualizado realizado da ação :", ret_realizado_acao)
-
-# %% 16. Fronteira eficiente com ativo livre de risco (aplicação e captação à mesma taxa)
-# Com um ativo livre de risco, a nova fronteira é a reta que sai de (0, rf) e tangencia a fronteira dos ativos de risco.
-# O trecho entre 0 e a carteira tangente é a aplicação à taxa livre de risco; o trecho além dela é a captação à taxa livre de risco.
-rf = base["cdi"].mean() * 12
+# Taxa livre de risco anual, nominal (média mensal x 12, consistente com a anualização dos retornos dos ativos)
+rf = cdi_mensal.mean() * 12
 print("Taxa livre de risco anual (CDI nominal):", rf)
 
+# %% 13. Fronteira eficiente com ativo livre de risco (aplicação e captação à mesma taxa)
+# Com um ativo livre de risco, a nova fronteira é a reta que sai de (0, rf) e tangencia a fronteira dos ativos de risco.
+# O trecho entre 0 e a carteira tangente é a aplicação à taxa livre de risco; o trecho além dela é a captação à taxa livre de risco.
 restr_soma = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
 
 # Carteira tangente: maximiza o índice de Sharpe (mesmo problema com limites de 0 a 1 nos pesos)
@@ -374,14 +322,11 @@ ret_aplic = rf + sharpe_t * sig_aplic
 sig_capt = np.linspace(sig_t, 1.8 * sig_t, 50)
 ret_capt = rf + sharpe_t * sig_capt
 
-# Parte eficiente e parte ineficiente da fronteira dos ativos de risco
-mascara_ef = alvos >= mu_mv - 1e-9
-
 fig, ax = plt.subplots(figsize=(11, 6))
-ax.plot(sig_front[~mascara_ef], alvos[~mascara_ef], color="gray", linestyle=":", linewidth=1.5,
-        label="Fronteira dos ativos de risco (parte ineficiente)")
-ax.plot(sig_front[mascara_ef], alvos[mascara_ef], color="gray", linewidth=2,
-        label="Fronteira dos ativos de risco (parte eficiente)")
+ax.plot(sig_inef, ret_inef, color="gray", linestyle=":", linewidth=1.5,
+        label="Mínima variância de ativos de risco (parte ineficiente)")
+ax.plot(sig_ef, ret_ef, color="gray", linewidth=2,
+        label="Fronteira eficiente de ativos de risco")
 ax.plot(sig_aplic, ret_aplic, color="darkgreen", linewidth=3, label="Aplicação à taxa livre de risco")
 ax.plot(sig_capt, ret_capt, color="firebrick", linewidth=3, label="Captação à taxa livre de risco")
 ax.scatter(sigma_anual.values, mu, color="lightgray", edgecolor="gray", s=30, zorder=2)
@@ -402,7 +347,7 @@ fator = 1.5
 print(f"Para risco igual a {fator} vezes o da tangente: peso na tangente = {fator:.2f}, peso no ativo livre de risco = {1 - fator:.2f}")
 print("Retorno esperado correspondente:", rf + fator * (mu_t - rf))
 
-# %% 17. Fronteira eficiente com taxa de aplicação (lending) menor que taxa de captação (borrowing)
+# %% 14. Fronteira eficiente com taxa de aplicação (lending) menor que taxa de captação (borrowing)
 # O investidor aplica a rl e capta a rb, com rl < rb. Cada taxa gera sua própria carteira tangente.
 rl = rf
 spread_captacao = 0.03          # spread assumido de 3 pontos percentuais ao ano; altere à vontade
@@ -451,8 +396,8 @@ sig_prol_b = np.linspace(0, sig_tb, 50)
 ret_prol_b = rb + sharpe_b * sig_prol_b
 
 fig, ax = plt.subplots(figsize=(11, 6))
-ax.plot(sig_front[mascara_ef], alvos[mascara_ef], color="lightgray", linewidth=1.5,
-        label="Fronteira dos ativos de risco")
+ax.plot(sig_ef, ret_ef, color="lightgray", linewidth=1.5,
+        label="Fronteira eficiente de ativos de risco")
 ax.plot(sig_prol_l, ret_prol_l, color="gray", linestyle="--", linewidth=1, label="Prolongamentos que deixam de valer")
 ax.plot(sig_prol_b, ret_prol_b, color="gray", linestyle="--", linewidth=1)
 ax.plot(sig_aplic2, ret_aplic2, color="darkgreen", linewidth=3, label="Aplicação à taxa rl")
@@ -473,3 +418,68 @@ ax.set_title("Fronteira eficiente com taxa de aplicação menor que a taxa de ca
 ax.legend(loc="lower right")
 fig.savefig("fronteira_rl_rb.png", dpi=200, bbox_inches="tight")
 plt.show()
+
+# %% 15. CAPM na prática: dados mensais (slides 21 e 22)
+# Retornos mensais dos últimos 5 anos, Ibovespa como mercado e CDI na curva como ativo livre de risco.
+precos_mensais = dados[["^BVSP", ticker_acao]].resample("ME").last()
+ret_mensal = precos_mensais.pct_change().dropna()
+ret_mensal.index = ret_mensal.index.to_period("M")
+
+base = ret_mensal.join(cdi_mensal, how="inner").dropna()
+base["premio_acao"] = base[ticker_acao] - base["cdi"]
+base["premio_mercado"] = base["^BVSP"] - base["cdi"]
+print(base.tail())
+print("Número de observações mensais:", len(base))
+
+# %% 16. Retornos da ação contra o Ibovespa (slide 23)
+fig, ax = plt.subplots()
+ax.scatter(base["^BVSP"], base[ticker_acao], color="navy", alpha=0.7)
+ax.axhline(0, color="black", linewidth=0.8)
+ax.axvline(0, color="black", linewidth=0.8)
+ax.set_xlabel("Retorno mensal do Ibovespa")
+ax.set_ylabel(f"Retorno mensal de {ticker_acao}")
+ax.set_title("Retornos mensais: ação x Ibovespa")
+fig.savefig("scatteracaoibov.png", dpi=200, bbox_inches="tight")
+plt.show()
+
+# %% 17. Regressão do CAPM com prêmios de risco (slide 24)
+# Y = beta0 + beta1 X + erro, com X o prêmio de risco de mercado e Y o prêmio de risco da ação.
+reg = stats.linregress(base["premio_mercado"], base["premio_acao"])
+beta0 = reg.intercept   # alfa de Jensen mensal
+beta1 = reg.slope       # beta da ação
+print("Alfa mensal :", beta0, " (erro padrão:", reg.intercept_stderr, ")")
+print("Beta        :", beta1, " (erro padrão:", reg.stderr, ")")
+print("R ao quadrado:", reg.rvalue**2)
+print("p-valor do beta:", reg.pvalue)
+
+# Conferência manual: beta = cov(X,Y) / var(X)
+beta_manual = base["premio_mercado"].cov(base["premio_acao"]) / base["premio_mercado"].var()
+print("Beta manual :", beta_manual)
+
+xx = np.linspace(base["premio_mercado"].min(), base["premio_mercado"].max(), 100)
+fig, ax = plt.subplots()
+ax.scatter(base["premio_mercado"], base["premio_acao"], color="navy", alpha=0.7)
+ax.plot(xx, beta0 + beta1 * xx, color="firebrick", linewidth=2, label=f"beta = {beta1:.2f}")
+ax.axhline(0, color="black", linewidth=0.8)
+ax.axvline(0, color="black", linewidth=0.8)
+ax.set_xlabel("Prêmio de risco do mercado (Ibovespa - CDI)")
+ax.set_ylabel(f"Prêmio de risco de {ticker_acao} (ação - CDI)")
+ax.set_title("CAPM: regressão dos prêmios de risco")
+ax.legend()
+fig.savefig("regressao.png", dpi=200, bbox_inches="tight")
+plt.show()
+
+# %% 18. Retorno esperado pelo CAPM (slide 21)
+# r_i = r_f + beta (r_m - r_f), com tudo anualizado em termos nominais.
+rf_anual = (1 + base["cdi"]).prod() ** (12 / len(base)) - 1
+rm_anual = (1 + base["^BVSP"]).prod() ** (12 / len(base)) - 1
+premio_mercado_anual = rm_anual - rf_anual
+
+ret_esperado_capm = rf_anual + beta1 * premio_mercado_anual
+ret_realizado_acao = (1 + base[ticker_acao]).prod() ** (12 / len(base)) - 1
+
+print("Taxa livre de risco anual (CDI)      :", rf_anual)
+print("Retorno anual do Ibovespa            :", rm_anual)
+print("Prêmio de risco de mercado anual     :", premio_mercado_anual)
+print("Retorno esperado pelo CAPM da ação   :", ret_esperado_capm)
+print("Retorno anualizado realizado da ação :", ret_realizado_acao)
